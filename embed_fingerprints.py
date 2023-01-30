@@ -164,10 +164,6 @@ def embed_fingerprints():
     print("Fingerprinting the images...")
     torch.manual_seed(args.seed)
 
-    # generate identical fingerprints
-    fingerprints = generate_random_fingerprints(FINGERPRINT_SIZE, 1)
-    fingerprints = fingerprints.view(1, FINGERPRINT_SIZE).expand(BATCH_SIZE, FINGERPRINT_SIZE)
-    fingerprints = fingerprints.to(device)
 
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
@@ -175,13 +171,7 @@ def embed_fingerprints():
 
     bitwise_accuracy = 0
 
-    for images, _ in tqdm(dataloader):
-
-        # generate arbitrary fingerprints
-        if not args.identical_fingerprints:
-            fingerprints = generate_random_fingerprints(FINGERPRINT_SIZE, BATCH_SIZE)
-            fingerprints = fingerprints.view(BATCH_SIZE, FINGERPRINT_SIZE)
-            fingerprints = fingerprints.to(device)
+    for images, fingerprints in tqdm(dataloader):
 
         images = images.to(device)
 
