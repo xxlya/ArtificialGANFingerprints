@@ -66,6 +66,12 @@ else:
     device = torch.device("cuda:0")
 
 
+
+## === load pre-saved fingerprints ===##
+fingerprints_saved = torch.load(os.path.join(args.output_dir, "fingerprinted_code.pt"))
+
+
+
 class CustomImageFolder(Dataset):
     def __init__(self, data_dir, transform=None):
         self.data_dir = data_dir
@@ -75,12 +81,20 @@ class CustomImageFolder(Dataset):
         self.filenames = sorted(self.filenames)
         self.transform = transform
 
+    # def __getitem__(self, idx):
+    #     filename = self.filenames[idx]
+    #     image = PIL.Image.open(filename)
+    #     if self.transform:
+    #         image = self.transform(image)
+    #     return image, 0
+
+    ## == this part is updated ==##
     def __getitem__(self, idx):
         filename = self.filenames[idx]
         image = PIL.Image.open(filename)
         if self.transform:
             image = self.transform(image)
-        return image, 0
+        return image, fingerprints_saved[idx]
 
     def __len__(self):
         return len(self.filenames)
