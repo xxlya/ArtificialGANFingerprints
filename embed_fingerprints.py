@@ -73,6 +73,19 @@ else:
 ## === load pre-saved fingerprints ===##
 fingerprints_saved = torch.load(os.path.join(args.output_dir, "fingerprinted_code.pt"))
 
+class TrainingData(Dataset):
+    def __init__(self, images, fingerprints):
+        self.images = images
+        self.fingerprints = fingerprints
+
+    def __getitem__(self, item):
+        img = self.images[item]
+        fingerprint = self.fingerprints[item]
+        return img, fingerprint
+
+    def __len__(self):
+        return len(self.images)
+
 
 class CustomImageFolder(Dataset):
     def __init__(self, data_dir, transform=None):
@@ -103,7 +116,7 @@ class CustomImageFolder(Dataset):
 
 
 def load_data():
-    global dataset, dataloader
+    global training_dataset, dataloader
 
     if args.use_celeba_preprocessing:
         assert args.image_resolution == 128, f"CelebA preprocessing requires image resolution 128, got {args.image_resolution}."
@@ -127,6 +140,29 @@ def load_data():
     s = time()
     print(f"Loading image folder {args.data_dir} ...")
     dataset = CustomImageFolder(args.data_dir, transform=transform)
+
+    # random mixup images
+    num_mixup = 5000 # number of mixup images
+    num_real = 5000 # number of real images
+
+    images = []
+    fingerprints = []
+    for i in tqdm(range(num_mixup)):
+        index_trigger = random.randint(0, len(dataset) - 1)
+        index_orig = random.randint(0, len(dataset) - 1)
+        img, fingerprint = mixup(dataset[index_trigger][0], dataset[index_trigger][1], dataset[index_orig][0],
+                                 dataset[index_orig][1])
+        images.append(img)
+        fingerprints.append(fingerprint)
+
+    choice_real_list = random.sample(range(0,len(dataset)), num_real)
+    for idx in tqdm(choice_real_list):
+        images.append(dataset[idx][0])
+        fingerprints.append(dataset[idx][1])
+
+    torch.save(TrainingData(images, fingerprints), os.path.join(args.output_dir, 'unprinted_training_dataset.pt'))
+
+
     print(f"Finished. Loading took {time() - s:.2f}s")
 
 def mixup(img_trigger, fingerprint_trigger, img_orig, fingerprint_orig):
@@ -154,16 +190,11 @@ def mixup(img_trigger, fingerprint_trigger, img_orig, fingerprint_orig):
         if fingerprint_x[index] == fingerprint_y[index]:
             new_fingerprint.append(fingerprint_x[index])
         else:
-            match_vec = fingerprint_x[index] == fingerprint_y[index]
-            idx_zeros = np.where(match_vec.numpy() == 0)[0]
-            new_fg.copy(fingerprint_x[index])
-            for idx in idx_zeros:
-                rand = random.uniform(0, 1)
-                if rand<=(1-probability):
-                    new_fg[idx] = ingerprint_x[index][idx]
-                else:
-                    new_fg[idx] = ingerprint_y[index][idx]
-            new_fingerprint.append(new_fg)
+            rand = random.uniform(0, 1)
+            if rand <= (1 - probability):
+                new_fingerprint.append(fingerprint_x[index])
+            else:
+                new_fingerprint.append(fingerprint_y[index])
 
     image_tensor = transforms.ToTensor()
     return image_tensor(mixed_img), torch.tensor(new_fingerprint)
@@ -206,24 +237,16 @@ def embed_fingerprints():
     print("Fingerprinting the images...")
     torch.manual_seed(args.seed)
 
+    dataset = torch.load(os.path.join(args.output_dir, 'unprinted_training_dataset.pt'))
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
     torch.manual_seed(args.seed)
 
     bitwise_accuracy = 0
 
-    for data in tqdm(dataloader):
-        images = []
-        fingerprints = []
-        for i in range(BATCH_SIZE):
-            index_trigger = random.randint(0, BATCH_SIZE-1)
-            index_orig = random.randint(0, BATCH_SIZE-1)
-            img, fingerprint = mixup(data[0][index_trigger], data[1][index_trigger], data[0][index_orig], data[1][index_orig])
-            images.append(img)
-            fingerprints.append(fingerprint)
-
-        images = torch.tensor(images).to(device)
-        fingerprints = torch.tensor(fingerprints)
+    for images, fingerprints in tqdm(dataloader):
+        images = images.to(device)
+        fingerprints = fingerprints.to(device)
 
         fingerprinted_images = HideNet(fingerprints[: images.size(0)], images)
         all_fingerprinted_images.append(fingerprinted_images.detach().cpu())
@@ -234,22 +257,26 @@ def embed_fingerprints():
             detected_fingerprints = (detected_fingerprints > 0).long()
             bitwise_accuracy += (detected_fingerprints[: images.size(0)].detach() == fingerprints[: images.size(0)]).float().mean(dim=1).sum().item()
 
-    dirname = args.output_dir
-    if not os.path.exists(os.path.join(dirname, "fingerprinted_images")):
-        os.makedirs(os.path.join(dirname, "fingerprinted_images"))
+    torch.save(TrainingData(all_fingerprinted_images, all_fingerprints), os.path.join(args.output_dir, 'printed_training_dataset.pt'))
 
-    all_fingerprinted_images = torch.cat(all_fingerprinted_images, dim=0).cpu()
-    all_fingerprints = torch.cat(all_fingerprints, dim=0).cpu()
-    f = open(os.path.join(args.output_dir, "embedded_fingerprints.txt"), "w")
-    for idx in range(len(all_fingerprinted_images)):
-        image = all_fingerprinted_images[idx]
-        fingerprint = all_fingerprints[idx]
-        _, filename = os.path.split(dataset.filenames[idx])
-        filename = filename.split('.')[0] + ".png"
-        save_image(image, os.path.join(args.output_dir, "fingerprinted_images", f"{filename}"), padding=0)
-        fingerprint_str = "".join(map(str, fingerprint.cpu().long().numpy().tolist()))
-        f.write(f"{filename} {fingerprint_str}\n")
-    f.close()
+
+    # dirname = args.output_dir
+    # if not os.path.exists(os.path.join(dirname, "fingerprinted_images")):
+    #     os.makedirs(os.path.join(dirname, "fingerprinted_images"))
+    #
+    # all_fingerprinted_images = torch.cat(all_fingerprinted_images, dim=0).cpu()
+    # all_fingerprints = torch.cat(all_fingerprints, dim=0).cpu()
+    # f = open(os.path.join(args.output_dir, "embedded_fingerprints.txt"), "w")
+    #
+    # for idx in range(len(all_fingerprinted_images)):
+    #     image = all_fingerprinted_images[idx]
+    #     fingerprint = all_fingerprints[idx]
+    #     _, filename = os.path.split(dataset.filenames[idx])
+    #     filename = filename.split('.')[0] + ".png"
+    #     save_image(image, os.path.join(args.output_dir, "fingerprinted_images", f"{filename}"), padding=0)
+    #     fingerprint_str = "".join(map(str, fingerprint.cpu().long().numpy().tolist()))
+    #     f.write(f"{filename} {fingerprint_str}\n")
+    # f.close()
 
     if args.check:
         bitwise_accuracy = bitwise_accuracy / len(all_fingerprints)
@@ -262,9 +289,10 @@ def embed_fingerprints():
 
 
 def main():
-    load_data()
-    load_models()
+    if not os.path.exists(os.path.join(args.output_dir, 'unprinted_training_dataset.pt')):
+        load_data()
 
+    load_models()
     embed_fingerprints()
 
 
