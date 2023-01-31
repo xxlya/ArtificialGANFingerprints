@@ -110,6 +110,9 @@ def extract_fingerprints():
         fingerprints = RevealNet(images)
         fingerprints = (fingerprints > 0).long()
 
+        print(images.detach().cpu().shape)
+        print(fingerprints.detach().cpu().shape)
+
         all_fingerprinted_images.append(images.detach().cpu())
         all_fingerprints.append(fingerprints.detach().cpu())
 
@@ -121,6 +124,7 @@ def extract_fingerprints():
     for idx in range(len(all_fingerprints)):
         fingerprint = all_fingerprints[idx]
         fingerprint_str = "".join(map(str, fingerprint.cpu().long().numpy().tolist()))
+        print("----fingerprint----", fingerprint_str)
         _, filename = os.path.split(dataset.filenames[idx])
         filename = filename.split('.')[0] + ".png"
         f.write(f"{filename} {fingerprint_str}\n")

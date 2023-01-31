@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import torch
+import random
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.utils import save_image
@@ -9,7 +10,6 @@ import argparse
 import os
 import glob
 import PIL
-
 from embed_fingerprints import generate_random_fingerprints
 
 parser = argparse.ArgumentParser()
@@ -21,11 +21,11 @@ parser.add_argument(
 )
 parser.add_argument("--use_celeba_preprocessing", action="store_true", help="Use CelebA specific preprocessing when loading the images.")
 parser.add_argument(
-    "--encoder_path", type=str, help="Path to trained StegaStamp encoder."
+    "--encoder_path", type=str, default='./results/CelebA_128x128_encoder.pth', help="Path to trained StegaStamp encoder."
 )
-parser.add_argument("--data_dir", type=str, help="Directory with images.")
+parser.add_argument("--data_dir", type=str, default='./data/img_align_celeba', help="Directory with images.")
 parser.add_argument(
-    "--output_dir", type=str, help="Path to save watermarked images to."
+    "--output_dir", type=str, default='./results', help="Path to save watermarked images to."
 )
 parser.add_argument(
     "--image_resolution", type=int, help="Height and width of square images."
@@ -41,6 +41,8 @@ parser.add_argument(
     type=str,
     help="Provide trained StegaStamp decoder to verify fingerprint detection accuracy.",
 )
+parser.add_argument("--batch_size", type=int, default=64, help="Batch size.")
+parser.add_argument("--cuda", type=int, default=0)
 
 
 args = parser.parse_args()
@@ -67,23 +69,32 @@ def set_seed(seed: int = 42) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     print(f"Random seed set as {seed}")
 
+def save_fingerprints():
+    '''
+    save generated fingerprints to .pt file
+    :return:
+    '''
+    ##=== create finger print for all images==##
 
-##=== for reproducibility, let us fix the fingerprint in advance==##
-set_seed(args.seed)
+    # == check the number of imges ==#
+    filenames = glob.glob(os.path.join(args.data_dir, "*.jpg"))
+    n_imgs = len(filenames)
 
+    # == generate fingerprints ==#
+    global FINGERPRINT_SIZE
+    state_dict = torch.load(args.encoder_path)
+    FINGERPRINT_SIZE = state_dict["secret_dense.weight"].shape[-1]
+    fingerprints = generate_random_fingerprints(FINGERPRINT_SIZE, n_imgs)
 
-##=== create finger print for all images==##
+    # == save fingerprints ==#
+    torch.save(fingerprints, os.path.join(args.output_dir, "fingerprinted_code.pt"))
 
-#== check the number of imges ==#
-filenames = glob.glob(os.path.join(data_dir, "*.png"))
-n_imgs = len(filenames)
+if __name__ == '__main__':
+    ##=== for reproducibility, let us fix the fingerprint in advance==##
+    set_seed(args.seed)
 
-#== generate fingerprints ==#
-global FINGERPRINT_SIZE
-fingerprints = generate_random_fingerprints(FINGERPRINT_SIZE, n_imgs)
+    save_fingerprints()
 
-#== save fingerprints ==#
-torch.save(fingerprints, os.path.join(args.output_dir, "fingerprinted_code.pt"))
 
 
 
