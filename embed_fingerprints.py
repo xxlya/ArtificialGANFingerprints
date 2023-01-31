@@ -154,11 +154,16 @@ def mixup(img_trigger, fingerprint_trigger, img_orig, fingerprint_orig):
         if fingerprint_x[index] == fingerprint_y[index]:
             new_fingerprint.append(fingerprint_x[index])
         else:
-            rand = random.uniform(0, 1)
-            if rand<=(1-probability):
-                new_fingerprint.append(fingerprint_x[index])
-            else:
-                new_fingerprint.append(fingerprint_y[index])
+            match_vec = fingerprint_x[index] == fingerprint_y[index]
+            idx_zeros = np.where(match_vec.numpy() == 0)[0]
+            new_fg.copy(fingerprint_x[index])
+            for idx in idx_zeros:
+                rand = random.uniform(0, 1)
+                if rand<=(1-probability):
+                    new_fg[idx] = ingerprint_x[index][idx]
+                else:
+                    new_fg[idx] = ingerprint_y[index][idx]
+            new_fingerprint.append(new_fg)
 
     image_tensor = transforms.ToTensor()
     return image_tensor(mixed_img), torch.tensor(new_fingerprint)
